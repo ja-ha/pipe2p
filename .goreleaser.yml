@@ -1,0 +1,30 @@
+version: 2
+
+project_name: pipe2p
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pipe2p
+    main: ./cmd/pipe2p
+    binary: pipe2p
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/ja-ha/pipe2p/internal/cli.version={{ .Version }} -X github.com/ja-ha/pipe2p/internal/cli.commit={{ .Commit }} -X github.com/ja-ha/pipe2p/internal/cli.date={{ .Date }}
+  - id: relay
+    main: ./cmd/relay
+    binary: pipe2p-relay
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: binaries
+    ids:
+      - pipe2p
+      - relay
+
+changelog:
+  use: github

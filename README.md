@@ -55,6 +55,15 @@ pipe2p send -c -l 16 large_dataset.csv
 * `-v`, `--verbose`: Enable verbose output for debugging connections.
 * `--relay <multiaddr>`: Use a custom relay node multiaddress instead of the default bootstrap peers.
 
+## Releases
+
+This repository is configured for [GoReleaser](https://goreleaser.com/) with `.goreleaser.yml`.
+Release builds inject version metadata into `pipe2p` via linker flags:
+
+* `version`
+* `commit`
+* `date`
+
 **Note:** Public bootstrap nodes have very strict limits, so if hole punching fails, they generally won't suffice for heavy transfers.
 
 ## Hosting Your Own Relay
