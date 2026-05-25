@@ -65,8 +65,12 @@ var sendCmd = &cobra.Command{
 		}
 		defer node.Close()
 
-		// Request a Relay V2 reservation
-		reservation := makeReservation(node)
+		// request a relay reservation
+		reservation, err := makeReservation(node)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to create relay reservation: %v\n", err)
+			os.Exit(1)
+		}
 
 		// choose a relay multiaddrs
 		// prefer tcp
@@ -135,43 +139,56 @@ var sendCmd = &cobra.Command{
 	},
 }
 
-func makeReservation(n host.Host) client.Reservation {
-	var reservation client.Reservation
-
+func makeReservation(n host.Host) (client.Reservation, error) {
 	if customRelay != "" {
 		addrInfo, err := peer.AddrInfoFromString(customRelay)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Failed to parse custom relay: %v\n", err)
-			os.Exit(1)
+			return client.Reservation{}, fmt.Errorf("unable to parse custom relay: %s", err)
 		}
 
 		_reservation, err := client.Reserve(context.Background(), n, *addrInfo)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Failed to reserve slot on custom relay: %v\n", err)
-			os.Exit(1)
+			return client.Reservation{}, fmt.Errorf("unable to reserve slot on custom relay: %s", err)
 		}
 
-		reservation = *_reservation
-	} else {
-		resChan := make(chan client.Reservation)
-		cancelContext, cancel := context.WithCancel(context.Background())
-
-		for _, addrInfo := range dht.GetDefaultBootstrapPeerAddrInfos() {
-			go func(c chan client.Reservation, ctx context.Context, host host.Host, addrInfo peer.AddrInfo) {
-				r, err := client.Reserve(ctx, host, addrInfo)
-				if err == nil {
-					select {
-					case c <- *r:
-					case <-ctx.Done():
-					}
-				}
-			}(resChan, cancelContext, n, addrInfo)
-		}
-
-		reservation = <-resChan
-		cancel()
+		return *_reservation, nil
 	}
-	return reservation
+
+	resChan := make(chan client.Reservation)
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for _, addrInfo := range dht.GetDefaultBootstrapPeerAddrInfos() {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			r, err := client.Reserve(cancelCtx, n, addrInfo)
+			if err != nil {
+				return
+			}
+
+			select {
+			case resChan <- *r:
+			case <-cancelCtx.Done():
+			}
+		}()
+	}
+
+	// Close channel if all
+	go func() {
+		wg.Wait()
+		close(resChan)
+	}()
+
+	reservation, ok := <-resChan
+	if !ok {
+		return client.Reservation{}, errors.New("unable to reserve slot on any bootstrap peer")
+	}
+
+	return reservation, nil
 }
 
 func init() {
