@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"pipe2p/internal/transfer"
 	"time"
+
+	"github.com/ja-ha/pipe2p/internal/transfer"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
