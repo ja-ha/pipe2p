@@ -1,7 +1,7 @@
 package main
 
 import (
-	"pipe2p/internal/cli"
+	"github.com/ja-ha/pipe2p/internal/cli"
 )
 
 func main() {

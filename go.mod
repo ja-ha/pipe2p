@@ -1,4 +1,4 @@
-module pipe2p
+module github.com/ja-ha/pipe2p
 
 go 1.26.3
 

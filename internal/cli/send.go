@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"pipe2p/internal/transfer"
 	"sync"
+
+	"github.com/ja-ha/pipe2p/internal/transfer"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
