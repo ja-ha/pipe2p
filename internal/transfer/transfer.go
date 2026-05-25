@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -50,14 +49,14 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	go func() {
 		select {
 		case <-sigChan:
-			log.Println("\nUser interrupt. Canceling transfer...")
+			_, _ = fmt.Fprintln(os.Stderr, "\nUser interrupt. Canceling transfer...")
 			_ = stream.ResetWithError(network.StreamShutdown)
 		case <-sigDone:
 		}
 	}()
 
 	if Verbose {
-		log.Println("Receiver connected")
+		_, _ = fmt.Fprintln(os.Stderr, "Receiver connected")
 	}
 
 	meta := Metadata{Name: name, Size: size, Compress: Compress}
@@ -65,17 +64,17 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	metaLen := int64(len(metaBytes))
 
 	if err := binary.Write(stream, binary.BigEndian, metaLen); err != nil {
-		log.Println("Error writing metadata length: ", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error writing metadata length: %s\n", err)
 		return
 	}
 
 	if err := binary.Write(stream, binary.BigEndian, metaBytes); err != nil {
-		log.Fatalf("Error writing metadata: %s", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error writing metadata: %s\n", err)
 		return
 	}
 
 	if Verbose {
-		log.Println("Sent metadata")
+		_, _ = fmt.Fprintln(os.Stderr, "Sent metadata")
 	}
 
 	bar := getBar(name != "", size, "Uploading")
@@ -84,9 +83,12 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	var zstdWriter *zstd.Writer
 	if Compress {
 		zstdWriter = zstd.NewWriterLevel(stream, CompressLvl)
+		defer zstdWriter.Close()
+
 		writer = io.MultiWriter(zstdWriter, bar)
+
 		if Verbose {
-			log.Printf("Compressing data using zstd level %d", CompressLvl)
+			_, _ = fmt.Fprintf(os.Stderr, "Compressing data using zstd level %d\n", CompressLvl)
 		}
 
 	} else {
@@ -98,14 +100,13 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	if err != nil {
 		_ = bar.Exit()
 		_ = bar.Close()
-		_, _ = fmt.Fprintln(os.Stderr)
-		log.Println("Transfer interrupted: ", err)
+		_, _ = fmt.Fprintf(os.Stderr, "\nTransfer interrupted: %s\n", err)
 		return
 	}
 
 	if Compress {
 		if err = zstdWriter.Close(); err != nil {
-			log.Println("Failed to close zstd stream: ", err)
+			_, _ = fmt.Fprintln(os.Stderr, "Failed to close zstd stream: ", err)
 			return
 		}
 	}
@@ -117,15 +118,14 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	// Wait for the receiver to acknowledge they got the whole stream
 	ack := make([]byte, 1)
 	if _, err = io.ReadFull(stream, ack); err != nil {
-		log.Println("Receiver did not send success signal: ", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Receiver did not send success signal: %s\n", err)
 		return
 	}
 
 	_ = bar.Clear()
 	_ = bar.Close()
 
-	_, _ = fmt.Fprintln(os.Stderr)
-	log.Println("Transfer complete!")
+	_, _ = fmt.Fprintln(os.Stderr, "\nTransfer complete!")
 }
 
 func ReceiveFile(stream network.Stream) error {
@@ -141,7 +141,7 @@ func ReceiveFile(stream network.Stream) error {
 	go func() {
 		select {
 		case <-sigChan:
-			log.Println("\nUser interrupt. Canceling transfer...")
+			_, _ = fmt.Fprintln(os.Stderr, "\nUser interrupt. Canceling transfer...")
 			_ = stream.ResetWithError(network.StreamShutdown)
 		case <-sigDone:
 		}
@@ -150,17 +150,17 @@ func ReceiveFile(stream network.Stream) error {
 	// read metadata length & JSON
 	var metaLen int64
 	if err := binary.Read(stream, binary.BigEndian, &metaLen); err != nil {
-		log.Println("Error reading metadata length:", err)
+		return fmt.Errorf("error reading metadata length: %s", err)
 	}
 
 	metaBytes := make([]byte, metaLen)
 	if _, err := io.ReadFull(stream, metaBytes); err != nil {
-		return err
+		return fmt.Errorf("error reading metadata: %s", err)
 	}
 
 	var meta Metadata
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
-		return err
+		return fmt.Errorf("error parsing metadata: %s", err)
 	}
 
 	var out io.Writer
@@ -172,20 +172,21 @@ func ReceiveFile(stream network.Stream) error {
 
 		// prompt for confirmation if stdout is attached to a terminal screen
 		if term.IsTerminal(int(os.Stdout.Fd())) {
-			if _, err := fmt.Fprintln(os.Stderr, "\n[WARN] Incoming stream has no filename and will print to the terminal."); err != nil {
-				return err
-			}
-			if _, err := fmt.Fprint(os.Stderr, "Do you want to continue? (y/n): "); err != nil {
+			if _, err := fmt.Fprint(os.Stderr, "\nWARNING: Incoming stream has no filename and will print to the terminal.\n"+
+				"Do you want to continue? (y/n): "); err != nil {
 				return err
 			}
 
 			reader := bufio.NewReader(os.Stdin)
-			response, _ := reader.ReadString('\n')
+			response, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("could not read user response: %s", err)
+			}
 			response = strings.TrimSpace(strings.ToLower(response))
 
 			if response != "y" && response != "yes" {
-				_ = stream.ResetWithError(network.StreamShutdown)
-				return fmt.Errorf("transfer aborted by user")
+				err = stream.ResetWithError(network.StreamShutdown)
+				return errors.Join(err, fmt.Errorf("transfer aborted by user"))
 			}
 		}
 	} else {
@@ -193,31 +194,33 @@ func ReceiveFile(stream network.Stream) error {
 
 		if _, err := os.Stat(savePath); err == nil {
 			if !AutoAcceptOverwrite {
-				log.Printf("File '%s' already exists.", meta.Name)
-				if _, err = fmt.Fprint(os.Stderr, "Do you want to overwrite it? (y/n): "); err != nil {
+				if _, err = fmt.Fprintf(os.Stderr, "File '%s' already exists.\nDo you want to overwrite it? (y/n): ", meta.Name); err != nil {
 					return err
 				}
 
 				reader := bufio.NewReader(os.Stdin)
-				response, _ := reader.ReadString('\n')
+				response, err := reader.ReadString('\n')
+				if err != nil {
+					return fmt.Errorf("could not read user response: %s", err)
+				}
 				response = strings.TrimSpace(strings.ToLower(response))
 
 				if response != "y" && response != "yes" {
 					_ = stream.ResetWithError(network.StreamShutdown)
-					return fmt.Errorf("transfer aborted: refused to overwrite existing file")
+					return fmt.Errorf("transfer aborted: User declined to overwrite existing file")
 				}
 			}
 		}
 
 		file, err := os.Create(savePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("error creating file '%s': %s", savePath, err)
 		}
 		defer file.Close()
 
 		out = file
 
-		log.Printf("Receiving file: %s", meta.Name)
+		_, _ = fmt.Fprintf(os.Stderr, "Receiving file: %s\n", meta.Name)
 	}
 
 	bar := getBar(meta.Name != "", meta.Size, "Downloading")
@@ -228,7 +231,9 @@ func ReceiveFile(stream network.Stream) error {
 
 	var err error
 	if meta.Compress {
-		log.Println("Incoming data is compressed")
+		if Verbose {
+			_, _ = fmt.Fprintln(os.Stderr, "Incoming data is compressed")
+		}
 		zstdReader := zstd.NewReader(stream)
 		_, err = io.CopyBuffer(writer, zstdReader, buf)
 		err = errors.Join(err, zstdReader.Close())
@@ -244,12 +249,11 @@ func ReceiveFile(stream network.Stream) error {
 		return err
 	}
 
-	_, _ = fmt.Fprintln(os.Stderr)
-	log.Println("Transfer complete!")
+	_, _ = fmt.Fprintln(os.Stderr, "\nTransfer complete!")
 
 	// Send success signal to sender
 	if _, err = stream.Write([]byte{1}); err != nil {
-		return err
+		return fmt.Errorf("unable to signal success to sender: %v", err)
 	}
 
 	return nil

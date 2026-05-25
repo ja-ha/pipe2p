@@ -2,11 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"pipe2p/internal/transfer"
+	"sync"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -25,8 +26,6 @@ var sendCmd = &cobra.Command{
 	Short: "Send a file or stdin stream to a peer",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		log.SetOutput(os.Stderr)
-
 		transfer.Verbose = verbose
 		transfer.Compress = compress
 		transfer.CompressLvl = compressLvl
@@ -40,7 +39,8 @@ var sendCmd = &cobra.Command{
 			filePath := args[0]
 			file, err := os.Open(filePath)
 			if err != nil {
-				log.Fatalf("Could not open file: %v", err)
+				_, _ = fmt.Fprintf(os.Stderr, "Could not open file: %v\n", err)
+				os.Exit(1)
 			}
 			defer file.Close()
 
@@ -51,7 +51,8 @@ var sendCmd = &cobra.Command{
 		} else {
 			stat, _ := os.Stdin.Stat()
 			if (stat.Mode() & os.ModeCharDevice) != 0 {
-				log.Fatalf("No file specified and no data piped to stdin.")
+				_, _ = fmt.Fprintln(os.Stderr, "No file specified and no data piped to stdin.")
+				os.Exit(1)
 			}
 			source = os.Stdin
 			name = ""
@@ -59,21 +60,22 @@ var sendCmd = &cobra.Command{
 
 		node, err := NewNode(customRelay)
 		if err != nil {
-			log.Fatalf("Failed to start node: %v", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to start node: %v\n", err)
+			os.Exit(1)
 		}
 		defer node.Close()
 
 		// Request a Relay V2 reservation
 		reservation := makeReservation(node)
 
-		// Choose a relay multiaddrs
-		// Prefer tcp
+		// choose a relay multiaddrs
+		// prefer tcp
 		reserverationAddrs := ma.FilterAddrs(reservation.Addrs, FilterTCP)
 		if len(reserverationAddrs) == 0 {
 			reserverationAddrs = reservation.Addrs
 		}
 
-		// Prefer websocket
+		// prefer websocket
 		wssReserverationAddrs := ma.FilterAddrs(reserverationAddrs, FilterWSS)
 		if len(wssReserverationAddrs) != 0 {
 			reserverationAddrs = wssReserverationAddrs
@@ -92,13 +94,14 @@ var sendCmd = &cobra.Command{
 			}
 		}
 		if len(errs) == len(receiverDialedAddrs) {
-			log.Fatalln("Listening on all circuit addresses failed")
-			return
+			_, _ = fmt.Fprintln(os.Stderr, "Listening on all circuit addresses failed")
+			os.Exit(1)
 		}
 
 		peerCode, err := encodePeerAddrinfo(node.ID(), receiverDialedAddrs)
 		if err != nil {
-			log.Fatalf("Failed to encode peer code: %v", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to encode peer code: %v\n", err)
+			os.Exit(1)
 		}
 
 		// setup done, register stream handler
@@ -108,8 +111,9 @@ var sendCmd = &cobra.Command{
 			transfer.HandleIncomingStream(s, source, name, size, done, connected)
 		})
 
-		if _, err = fmt.Fprintf(os.Stderr, "To receive run:\npipe2p receive %s\n\n", peerCode); err != nil {
-			log.Fatalf("Error during stdout write: %s\n", err)
+		_, err = fmt.Fprintf(os.Stderr, "To receive run:\npipe2p receive %s\n\n", peerCode)
+		if err != nil {
+			os.Exit(1)
 		}
 
 		ctx, cancel := context.WithDeadline(context.Background(), reservation.Expiration)
@@ -119,11 +123,11 @@ var sendCmd = &cobra.Command{
 		select {
 		case <-connected:
 			if verbose {
-				log.Println("Connected to peer")
+				_, _ = fmt.Fprintln(os.Stderr, "Connected to peer")
 			}
 			<-done
 			if verbose {
-				log.Println("Disconnected from peer")
+				_, _ = fmt.Fprintln(os.Stderr, "Disconnected from peer")
 			}
 		case <-ctx.Done():
 			// Reservation expired before connection
@@ -137,12 +141,14 @@ func makeReservation(n host.Host) client.Reservation {
 	if customRelay != "" {
 		addrInfo, err := peer.AddrInfoFromString(customRelay)
 		if err != nil {
-			log.Fatalf("Failed to parse custom relay: %v", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to parse custom relay: %v\n", err)
+			os.Exit(1)
 		}
 
 		_reservation, err := client.Reserve(context.Background(), n, *addrInfo)
 		if err != nil {
-			log.Fatalf("Failed to reserve slot on custom relay: %v", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to reserve slot on custom relay: %v\n", err)
+			os.Exit(1)
 		}
 
 		reservation = *_reservation

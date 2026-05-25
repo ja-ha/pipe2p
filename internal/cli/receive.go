@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"pipe2p/internal/transfer"
 	"time"
@@ -23,24 +22,25 @@ var receiveCmd = &cobra.Command{
 	Short: "Receive a file from a peer",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		log.SetOutput(os.Stderr)
-
 		transfer.Verbose = verbose
 		transfer.AutoAcceptOverwrite = receiveYesOverwrite
 
 		peerCode := args[0]
 		p, err := decodePeerAddrinfo(peerCode)
 		if err != nil {
-			log.Fatalln("Failed to decode peer code: ", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to decode peer code: %s\n", err)
+			os.Exit(1)
 		}
 
 		if len(p.Addrs) == 0 {
-			log.Fatal("No multiaddress in peer record")
+			_, _ = fmt.Fprintln(os.Stderr, "No multiaddress in peer record")
+			os.Exit(1)
 		}
 
 		node, err := NewNode("")
 		if err != nil {
-			log.Fatalln("Failed to start node: ", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to start node: %s\n", err)
+			os.Exit(1)
 		}
 		defer node.Close()
 
@@ -74,7 +74,7 @@ var receiveCmd = &cobra.Command{
 				}
 
 				if verbose {
-					log.Println("Trying connection via ", a)
+					_, _ = fmt.Fprintf(os.Stderr, "Trying connection via %s\n", a)
 				}
 
 				err = node.Connect(conCtx, *ai)
@@ -92,7 +92,7 @@ var receiveCmd = &cobra.Command{
 			if err == nil {
 				connected = true
 				if verbose {
-					log.Println("Connected to sender")
+					_, _ = fmt.Fprintln(os.Stderr, "Connected to sender")
 				}
 				break
 			}
@@ -100,7 +100,8 @@ var receiveCmd = &cobra.Command{
 		conCtxCancel()
 
 		if !connected {
-			log.Fatalln("Failed to connect to sender on any address")
+			_, _ = fmt.Fprintln(os.Stderr, "Failed to connect to sender on any address")
+			os.Exit(1)
 		}
 
 		// wait for hole punch success or timeout
@@ -109,10 +110,10 @@ var receiveCmd = &cobra.Command{
 		select {
 		case <-holePunchedCh:
 			stopSpinner()
-			log.Println("Direct connection established")
+			_, _ = fmt.Fprintln(os.Stderr, "Direct connection established")
 		case <-hpCtx.Done():
 			stopSpinner()
-			log.Println("Timed out waiting for direct connection, using relay")
+			_, _ = fmt.Fprintln(os.Stderr, "Timed out waiting for direct connection, using relay")
 		}
 		hpCtxCancel()
 		node.Network().StopNotify(notifiee)
@@ -125,12 +126,14 @@ var receiveCmd = &cobra.Command{
 		stopSpinner()
 
 		if err != nil {
-			log.Fatalln("Failed to open stream to peer. You may need to find a relay without limits.")
+			_, _ = fmt.Fprintln(os.Stderr, "Failed to open stream to peer. You may need to find a relay without limits.")
+			os.Exit(1)
 		}
 
 		// receive data
 		if err := transfer.ReceiveFile(stream); err != nil {
-			log.Fatalln("Transfer failed: ", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Transfer failed: %s\n", err)
+			os.Exit(1)
 		}
 	},
 }
