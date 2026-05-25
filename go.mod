@@ -3,7 +3,7 @@ module github.com/ja-ha/pipe2p
 go 1.26.3
 
 require (
-	github.com/DataDog/zstd v1.5.7
+	github.com/klauspost/compress v1.18.0
 	github.com/libp2p/go-libp2p v0.48.0
 	github.com/libp2p/go-libp2p-kad-dht v0.40.0
 	github.com/multiformats/go-multiaddr v0.16.1

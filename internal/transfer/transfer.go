@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DataDog/zstd"
+	"github.com/klauspost/compress/zstd"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/term"
@@ -80,9 +80,15 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	bar := getBar(name != "", size, "Uploading")
 
 	var writer io.Writer
-	var zstdWriter *zstd.Writer
+	var zstdWriter *zstd.Encoder
+	var err error
+
 	if Compress {
-		zstdWriter = zstd.NewWriterLevel(stream, CompressLvl)
+		zstdWriter, err = zstd.NewWriter(stream)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error creating zstd writer: %s\n", err)
+			return
+		}
 		defer zstdWriter.Close()
 
 		writer = io.MultiWriter(zstdWriter, bar)
@@ -96,7 +102,7 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 	}
 
 	buf := make([]byte, 1024*1024) // 1 MB
-	_, err := io.CopyBuffer(writer, source, buf)
+	_, err = io.CopyBuffer(writer, source, buf)
 	if err != nil {
 		_ = bar.Exit()
 		_ = bar.Close()
@@ -234,9 +240,15 @@ func ReceiveFile(stream network.Stream) error {
 		if Verbose {
 			_, _ = fmt.Fprintln(os.Stderr, "Incoming data is compressed")
 		}
-		zstdReader := zstd.NewReader(stream)
+
+		var zstdReader *zstd.Decoder
+		zstdReader, err = zstd.NewReader(stream)
+		if err != nil {
+			return fmt.Errorf("error creating zstd decompressor: %s", err)
+		}
+		defer zstdReader.Close()
+
 		_, err = io.CopyBuffer(writer, zstdReader, buf)
-		err = errors.Join(err, zstdReader.Close())
 	} else {
 		_, err = io.CopyBuffer(writer, stream, buf)
 	}
