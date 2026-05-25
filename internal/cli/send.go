@@ -17,6 +17,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var compress bool
+var compressLvl int
+
 var sendCmd = &cobra.Command{
 	Use:   "send [file_path]",
 	Short: "Send a file or stdin stream to a peer",
@@ -25,6 +28,8 @@ var sendCmd = &cobra.Command{
 		log.SetOutput(os.Stderr)
 
 		transfer.Verbose = verbose
+		transfer.Compress = compress
+		transfer.CompressLvl = compressLvl
 
 		var source io.Reader
 		var name string
@@ -165,4 +170,6 @@ func makeReservation(n host.Host) client.Reservation {
 
 func init() {
 	rootCmd.AddCommand(sendCmd)
+	sendCmd.Flags().BoolVarP(&compress, "compress", "c", false, "Compress data using zstd")
+	sendCmd.Flags().IntVarP(&compressLvl, "level", "l", 8, "Compression level for zstd data compression")
 }

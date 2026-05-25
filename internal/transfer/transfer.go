@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DataDog/zstd"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/term"
@@ -21,12 +23,15 @@ import (
 
 var Verbose bool
 var AutoAcceptOverwrite bool
+var Compress bool
+var CompressLvl int
 
 const ProtocolID = "/pipe2p/transfer/1.0.0"
 
 type Metadata struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"` // -1 indicates an unknown stream size (stdin)
+	Name     string `json:"name"`
+	Size     int64  `json:"size"` // -1 indicates an unknown stream size (stdin)
+	Compress bool   `json:"compress"`
 }
 
 func HandleIncomingStream(stream network.Stream, source io.Reader, name string, size int64, done chan struct{}, connected chan struct{}) {
@@ -55,7 +60,7 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 		log.Println("Receiver connected")
 	}
 
-	meta := Metadata{Name: name, Size: size}
+	meta := Metadata{Name: name, Size: size, Compress: Compress}
 	metaBytes, _ := json.Marshal(meta)
 	metaLen := int64(len(metaBytes))
 
@@ -75,7 +80,18 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 
 	bar := getBar(name != "", size, "Uploading")
 
-	writer := io.MultiWriter(stream, bar)
+	var writer io.Writer
+	var zstdWriter *zstd.Writer
+	if Compress {
+		zstdWriter = zstd.NewWriterLevel(stream, CompressLvl)
+		writer = io.MultiWriter(zstdWriter, bar)
+		if Verbose {
+			log.Printf("Compressing data using zstd level %d", CompressLvl)
+		}
+
+	} else {
+		writer = io.MultiWriter(stream, bar)
+	}
 
 	buf := make([]byte, 1024*1024) // 1 MB
 	_, err := io.CopyBuffer(writer, source, buf)
@@ -87,10 +103,18 @@ func HandleIncomingStream(stream network.Stream, source io.Reader, name string, 
 		return
 	}
 
-	// Wait for the receiver to acknowledge they got the whole stream
+	if Compress {
+		if err = zstdWriter.Close(); err != nil {
+			log.Println("Failed to close zstd stream: ", err)
+			return
+		}
+	}
+
 	if err = stream.CloseWrite(); err != nil {
 		return
 	}
+
+	// Wait for the receiver to acknowledge they got the whole stream
 	ack := make([]byte, 1)
 	if _, err = io.ReadFull(stream, ack); err != nil {
 		log.Println("Receiver did not send success signal: ", err)
@@ -193,7 +217,7 @@ func ReceiveFile(stream network.Stream) error {
 
 		out = file
 
-		log.Println("Receiving file: ", meta.Name)
+		log.Printf("Receiving file: %s", meta.Name)
 	}
 
 	bar := getBar(meta.Name != "", meta.Size, "Downloading")
@@ -201,7 +225,17 @@ func ReceiveFile(stream network.Stream) error {
 
 	buf := make([]byte, 1024*1024) // 1 MB
 	writer := io.MultiWriter(out, bar)
-	_, err := io.CopyBuffer(writer, stream, buf)
+
+	var err error
+	if meta.Compress {
+		log.Println("Incoming data is compressed")
+		zstdReader := zstd.NewReader(stream)
+		_, err = io.CopyBuffer(writer, zstdReader, buf)
+		err = errors.Join(err, zstdReader.Close())
+	} else {
+		_, err = io.CopyBuffer(writer, stream, buf)
+	}
+
 	if err != nil {
 		return fmt.Errorf("transfer interrupted: %v", err)
 	}
