@@ -173,5 +173,5 @@ func spinner(description string) func() {
 func init() {
 	rootCmd.AddCommand(receiveCmd)
 	receiveCmd.Flags().BoolVarP(&receiveYesOverwrite, "yes", "y", false, "Automatically overwrite existing files without prompting")
-	receiveCmd.Flags().DurationVarP(&holePunchTimeout, "dc-timeout", "t", time.Second*10, "Direct connection timeout")
+	receiveCmd.Flags().DurationVarP(&holePunchTimeout, "dc-timeout", "t", time.Second*20, "Direct connection timeout")
 }
