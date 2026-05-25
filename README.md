@@ -58,11 +58,10 @@ pipe2p send -c -l 16 large_dataset.csv
 ## Releases
 
 This repository is configured for [GoReleaser](https://goreleaser.com/) with `.goreleaser.yml`.
-Release builds inject version metadata into `pipe2p` via linker flags:
+Builds inject the CLI `version` via linker flags:
 
-* `version`
-* `commit`
-* `date`
+* Snapshot/dev builds use the short commit hash.
+* Release builds use the semantic version tag.
 
 **Note:** Public bootstrap nodes have very strict limits, so if hole punching fails, they generally won't suffice for heavy transfers.
 

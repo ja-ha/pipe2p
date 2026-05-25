@@ -13,7 +13,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X github.com/ja-ha/pipe2p/internal/cli.version={{ .Version }} -X github.com/ja-ha/pipe2p/internal/cli.commit={{ .Commit }} -X github.com/ja-ha/pipe2p/internal/cli.date={{ .Date }}
+      - -s -w -X github.com/ja-ha/pipe2p/internal/cli.version={{ if .IsSnapshot }}{{ .ShortCommit }}{{ else }}{{ .Version }}{{ end }}
   - id: relay
     main: ./cmd/relay
     binary: pipe2p-relay
