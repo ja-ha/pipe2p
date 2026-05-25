@@ -14,17 +14,35 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s -w -X github.com/ja-ha/pipe2p/internal/cli.version={{ if .IsSnapshot }}{{ .ShortCommit }}{{ else }}{{ .Version }}{{ end }}
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
   - id: relay
     main: ./cmd/relay
     binary: pipe2p-relay
     env:
       - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
 
 archives:
-  - id: binaries
-    ids:
-      - pipe2p
-      - relay
+  - format: binary
 
 changelog:
-  use: github
+  use: github-native
