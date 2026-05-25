@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/ugorji/go/codec"
@@ -23,11 +22,11 @@ func TestPreferTCPRanker(t *testing.T) {
 		t.Fatalf("expected 2 delays, got %d", len(delays))
 	}
 
-	if delays[0] != (network.AddrDelay{Addr: tcpAddr, Delay: 0}) {
+	if delays[0].Addr.String() != tcpAddr.String() || delays[0].Delay != 0 {
 		t.Fatalf("unexpected tcp delay: %#v", delays[0])
 	}
 
-	if delays[1] != (network.AddrDelay{Addr: udpAddr, Delay: 500 * time.Millisecond}) {
+	if delays[1].Addr.String() != udpAddr.String() || delays[1].Delay != 500*time.Millisecond {
 		t.Fatalf("unexpected udp delay: %#v", delays[1])
 	}
 }
@@ -35,12 +34,16 @@ func TestPreferTCPRanker(t *testing.T) {
 func TestFilterFunctions(t *testing.T) {
 	tcpAddr := ma.StringCast("/ip4/127.0.0.1/tcp/4001")
 	wssAddr := ma.StringCast("/dns/example.com/tcp/443/wss")
+	udpAddr := ma.StringCast("/ip4/127.0.0.1/udp/4001/quic-v1")
 
 	if !FilterTCP(tcpAddr) {
 		t.Fatal("expected tcp addr to pass FilterTCP")
 	}
-	if FilterTCP(wssAddr) {
-		t.Fatal("expected wss addr to fail FilterTCP")
+	if !FilterTCP(wssAddr) {
+		t.Fatal("expected wss addr to pass FilterTCP")
+	}
+	if FilterTCP(udpAddr) {
+		t.Fatal("expected udp addr to fail FilterTCP")
 	}
 
 	if !FilterWSS(wssAddr) {
@@ -53,10 +56,17 @@ func TestFilterFunctions(t *testing.T) {
 
 func TestGetCircuitAddr(t *testing.T) {
 	base := ma.StringCast("/ip4/127.0.0.1/tcp/4001")
-	id := peer.ID("test-peer-id")
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatalf("generate keypair: %v", err)
+	}
+	id, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatalf("peer id from key: %v", err)
+	}
 
 	got := GetCircuitAddr(base, id)
-	want := "/ip4/127.0.0.1/tcp/4001/p2p-circuit/p2p/test-peer-id"
+	want := "/ip4/127.0.0.1/tcp/4001/p2p-circuit/p2p/" + id.String()
 	if got.String() != want {
 		t.Fatalf("unexpected circuit addr: got %q, want %q", got.String(), want)
 	}
@@ -134,6 +144,9 @@ func encodeCompactForTest(compact CompactAddrInfo) (string, error) {
 		return "", err
 	}
 	if err = w.Flush(); err != nil {
+		return "", err
+	}
+	if err = w.Close(); err != nil {
 		return "", err
 	}
 
