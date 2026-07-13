@@ -61,18 +61,12 @@ func PreferTCPRanker(addrs []ma.Multiaddr) []network.AddrDelay {
 
 func FilterTCP(a ma.Multiaddr) bool {
 	_, err := a.ValueForProtocol(ma.P_TCP)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func FilterWSS(a ma.Multiaddr) bool {
 	_, err := a.ValueForProtocol(ma.P_WSS)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func GetCircuitAddr(a ma.Multiaddr, id peer.ID) ma.Multiaddr {
